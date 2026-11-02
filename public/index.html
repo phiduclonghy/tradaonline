@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>TRÀ ĐÁ ĐỘI SÁT HẠCH LÁI XE HƯNG YÊN — Online nhiều người</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin:0; padding:0; font-family: system-ui, 'Segoe UI', Roboto, sans-serif; background:#1d2b1a; color:#222; }
+  button { font-family: inherit; cursor: pointer; }
+  /* ---------- Màn hình vào phòng ---------- */
+  #joinScreen { min-height:100dvh; display:flex; align-items:center; justify-content:center; padding:16px;
+    background: linear-gradient(180deg,#ffe9a8 0%,#ffd76e 45%,#f7b733 100%); }
+  .joinCard { background:#fffdf5; border-radius:18px; padding:20px; width:100%; max-width:430px;
+    box-shadow:0 10px 30px rgba(0,0,0,.25); border:3px solid #8d5a1e; }
+  .joinCard h1 { margin:0 0 4px; font-size:21px; color:#8d5a1e; text-align:center; line-height:1.3; }
+  .joinCard .sub { text-align:center; color:#666; margin:0 0 14px; font-size:13px; }
+  .joinCard label { display:block; font-weight:600; font-size:13px; margin:10px 0 4px; color:#5b4020; }
+  .joinCard input[type=text], .joinCard input[type=password] { width:100%; padding:11px; font-size:16px;
+    border:2px solid #d8c391; border-radius:10px; background:#fff; }
+  .faces { display:flex; gap:6px; flex-wrap:wrap; }
+  .faces button { font-size:24px; width:46px; height:46px; border-radius:12px; border:2px solid #d8c391; background:#fff; }
+  .faces button.sel { border-color:#e07b00; background:#ffe9c9; transform:scale(1.08); }
+  .roles { display:flex; gap:8px; }
+  .roles button { flex:1; padding:11px 6px; font-size:15px; font-weight:700; border-radius:10px; border:2px solid #d8c391; background:#fff; }
+  .roles button.sel { border-color:#e07b00; background:#ffe9c9; }
+  #pwWrap { display:none; }
+  #joinBtn { width:100%; margin-top:16px; padding:14px; font-size:17px; font-weight:800; color:#fff;
+    background:linear-gradient(180deg,#f39c12,#e07b00); border:none; border-radius:12px; box-shadow:0 4px 0 #9c5a00; }
+  #joinErr { display:none; margin-top:10px; background:#fdecea; color:#b00020; border:1px solid #f5c6c0;
+    padding:9px 11px; border-radius:10px; font-size:14px; }
+  .hint { font-size:12px; color:#8a6d3b; margin-top:10px; line-height:1.5; }
+  /* ---------- Khung game ---------- */
+  #app { display:none; height:100dvh; flex-direction:column; background:#87b04c; }
+  header { background:#5d3a12; color:#ffe9a8; padding:6px 10px; display:flex; flex-wrap:wrap; gap:4px 14px;
+    align-items:center; font-size:13px; }
+  header .ttl { font-weight:800; font-size:14px; }
+  header b { color:#fff; }
+  /* Sân quán 2.5D */
+  #stage { position:relative; flex:1 1 auto; min-height:300px; overflow:hidden; touch-action:none;
+    background:
+      linear-gradient(180deg, #a8d08d 0 18%, #c9e39b 18% 22%, #e8d9a0 22% 100%); }
+  #stage .counter { position:absolute; left:0; right:0; top:0; height:19%;
+    background:linear-gradient(180deg,#a5671e,#8d5a1e); border-bottom:6px solid #6e4413;
+    display:flex; align-items:flex-end; justify-content:center; }
+  #sign { position:absolute; top:2px; left:50%; transform:translateX(-50%); width:94%; text-align:center;
+    background:#fff3c4; color:#8d0000; font-weight:900; font-size:clamp(11px,2.6vw,19px);
+    border:3px solid #8d0000; border-radius:8px; padding:3px 4px; letter-spacing:.3px; }
+  .decor { position:absolute; font-size:30px; text-align:center; pointer-events:none; }
+  .decor .cap { display:block; font-size:10px; font-weight:700; color:#33460f; background:rgba(255,255,255,.75);
+    border-radius:6px; padding:1px 4px; margin-top:-4px; }
+  #tank { left:2%; top:24%; }
+  #board { right:2%; top:23%; }
+  #coba { position:absolute; bottom:6%; left:50%; transform:translateX(-50%); text-align:center; pointer-events:none; z-index:3; }
+  #coba .face { font-size:36px; filter:drop-shadow(0 2px 2px rgba(0,0,0,.3)); }
+  #coba .nm { font-size:11px; font-weight:800; color:#fff; background:#8d5a1e; border-radius:8px; padding:1px 7px; }
+  #coba .bubble { display:none; position:absolute; bottom:105%; left:50%; transform:translateX(-50%); width:180px;
+    background:#fff; border:2px solid #8d5a1e; border-radius:10px; padding:4px 7px; font-size:12px; color:#333; }
+  .table { position:absolute; width:74px; height:56px; transform:translate(-50%,-50%); text-align:center; z-index:2;
+    background:radial-gradient(ellipse at 50% 38%, #fff7dd 0 34%, #deb887 35% 62%, #b5854a 63% 100%);
+    border-radius:50%; border:2px solid #8d5a1e; box-shadow:0 5px 8px rgba(0,0,0,.25); cursor:pointer; }
+  .table .emo { font-size:21px; line-height:1.15; }
+  .table .cap { font-size:10px; font-weight:700; color:#5b4020; background:rgba(255,255,255,.8); border-radius:6px; padding:0 4px; }
+  .table.full { outline:3px solid #e07b00; }
+  /* Người chơi */
+  .player { position:absolute; width:56px; transform:translate(-50%,-92%); text-align:center; z-index:5; pointer-events:none; }
+  .player .face { font-size:34px; line-height:1; filter:drop-shadow(0 3px 3px rgba(0,0,0,.35)); }
+  .player .nm { display:inline-block; margin-top:1px; font-size:11px; font-weight:700; color:#fff;
+    background:rgba(30,30,30,.72); border-radius:8px; padding:1px 7px; white-space:nowrap; }
+  .player.me .nm { background:#e07b00; }
+  .player .bubble { display:none; position:absolute; bottom:102%; left:50%; transform:translateX(-50%); width:170px;
+    background:#fff; border:2px solid #555; border-radius:10px; padding:4px 7px; font-size:12px; color:#222; z-index:9; }
+  .player .otag { display:none; margin:0 auto 2px; width:max-content; max-width:130px; font-size:12px;
+    background:#fff3c4; border:2px solid #e07b00; border-radius:9px; padding:1px 6px; color:#7a4a00; }
+  /* Thanh hành động */
+  #actions { display:flex; gap:8px; padding:8px; background:#f4e3bb; overflow-x:auto; }
+  #actions button { flex:1; min-width:104px; padding:12px 6px; font-size:15px; font-weight:700; border-radius:11px;
+    border:2px solid #b5854a; background:#fff; color:#5b4020; }
+  #actions button.primary { background:#e07b00; color:#fff; border-color:#9c5a00; }
+  #actions button:disabled { opacity:.38; }
+  /* Panel dưới: đơn + chat */
+  #panels { display:flex; gap:0; height:34dvh; min-height:170px; background:#fffdf5; border-top:3px solid #8d5a1e; }
+  #ordersPanel { flex:1.1; display:flex; flex-direction:column; border-right:2px solid #e5d6ac; min-width:0; }
+  #chatPanel { flex:1; display:flex; flex-direction:column; min-width:0; }
+  .pHead { font-weight:800; font-size:13px; color:#8d5a1e; padding:6px 9px 2px; }
+  #ordersList { flex:1; overflow-y:auto; padding:4px 9px; font-size:13px; }
+  .order { border:1.5px solid #d8c391; border-radius:10px; padding:6px 8px; margin-bottom:6px; background:#fff; }
+  .order .st { font-weight:700; }
+  .order button { margin-top:4px; margin-right:5px; padding:7px 10px; border-radius:8px; border:none;
+    background:#e07b00; color:#fff; font-weight:700; font-size:13px; }
+  .order button.go { background:#2e9e4f; }
+  #chatLog { flex:1; overflow-y:auto; padding:4px 9px; font-size:13px; line-height:1.45; }
+  #chatLog .sys { color:#7a5aa0; font-style:italic; }
+  #chatForm { display:flex; gap:6px; padding:6px; border-top:1.5px solid #e5d6ac; }
+  #chatIn { flex:1; padding:10px; font-size:15px; border:2px solid #d8c391; border-radius:9px; min-width:0; }
+  #chatForm button { padding:10px 14px; border:none; border-radius:9px; background:#e07b00; color:#fff; font-weight:800; }
+  /* Modal menu gọi món */
+  #menuModal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:50;
+    align-items:center; justify-content:center; padding:14px; }
+  .menuCard { background:#fffdf5; border-radius:16px; padding:16px; width:100%; max-width:380px; border:3px solid #8d5a1e; }
+  .menuCard h3 { margin:0 0 10px; color:#8d5a1e; }
+  .mItem { display:inline-block; margin:0 6px 8px 0; padding:9px 11px; font-size:14px; border-radius:10px;
+    border:2px solid #d8c391; background:#fff; }
+  .mItem.sel { border-color:#e07b00; background:#ffe9c9; font-weight:700; }
+  #toast { position:fixed; left:50%; bottom:38dvh; transform:translateX(-50%); z-index:60; display:none;
+    background:rgba(30,30,30,.9); color:#fff; padding:10px 16px; border-radius:12px; font-size:14px; max-width:88vw; text-align:center; }
+  @media (max-width:560px){ #panels{ flex-direction:column; height:38dvh; } #ordersPanel{ border-right:none; border-bottom:2px solid #e5d6ac; flex:.9; } }
+</style>
+</head>
+<body>
+
+<!-- ================= VÀO PHÒNG ================= -->
+<div id="joinScreen">
+  <div class="joinCard">
+    <h1>🧋 TRÀ ĐÁ<br>ĐỘI SÁT HẠCH LÁI XE HƯNG YÊN</h1>
+    <p class="sub">Quán trà đá online — nhiều người thật vào chung 1 phòng</p>
+    <label>Tên của bạn (tối đa 20 ký tự)</label>
+    <input type="text" id="inName" maxlength="20" placeholder="Ví dụ: Hùng, Lan Anh..." autocomplete="off">
+    <label>Mã phòng</label>
+    <input type="text" id="inRoom" maxlength="16" value="HUNGYEN" autocomplete="off">
+    <label>Chọn mặt hoạt hình</label>
+    <div class="faces" id="faceRow"></div>
+    <label>Bạn vào vai</label>
+    <div class="roles">
+      <button type="button" id="roleGuest" class="sel">🧍 Khách</button>
+      <button type="button" id="roleOwner">👑 Chủ quán</button>
+    </div>
+    <div id="pwWrap">
+      <label>Mật khẩu chủ quán</label>
+      <input type="password" id="inPw" inputmode="numeric" placeholder="Nhập mật khẩu chủ quán">
+    </div>
+    <div id="joinErr"></div>
+    <button id="joinBtn">Vào quán 🍵</button>
+    <p class="hint">Người vào sau vẫn thấy mọi người đã ở trong phòng. Mỗi phòng chỉ có <b>1 chủ quán</b>
+      (cần mật khẩu) — nếu phòng đã có chủ quán, bạn sẽ vào vai khách. Chưa có chủ quán thì <b>Cô Ba</b> bán thay.</p>
+  </div>
+</div>
+
+<!-- ================= TRONG QUÁN ================= -->
+<div id="app">
+  <header>
+    <span class="ttl">🧋 TRÀ ĐÁ ĐỘI SÁT HẠCH HƯNG YÊN</span>
+    <span>Phòng: <b id="hRoom">—</b></span>
+    <span>👥 Online: <b id="hOnline">0</b></span>
+    <span>Bạn: <b id="hMe">—</b></span>
+    <span>🥤 Ly đã bán: <b id="hCups">0</b></span>
+    <span>💰 Xu quán: <b id="hXu">0</b></span>
+    <span>⭐ Xu của bạn: <b id="hMyXu">0</b></span>
+  </header>
+
+  <div id="stage">
+    <div class="counter">
+      <div id="sign">TRÀ ĐÁ ĐỘI SÁT HẠCH LÁI XE HƯNG YÊN — 5K MỘT LY 🧋</div>
+      <div id="coba"><div class="bubble" id="cobaBubble"></div><div class="face">👩</div><div class="nm">Cô Ba · quầy</div></div>
+    </div>
+    <div class="decor" id="tank">🛢️<span class="cap">Trà đá miễn phí</span></div>
+    <div class="decor" id="board">📌<span class="cap">Bảng tin đội</span></div>
+    <!-- bàn ghế + người chơi được JS thêm vào -->
+  </div>
+
+  <div id="actions">
+    <button id="btnSit" class="primary" disabled>🪑 Ngồi ghế</button>
+    <button id="btnOrder" disabled>📋 Gọi món</button>
+    <button id="btnStand" disabled>🚶 Đứng dậy</button>
+  </div>
+
+  <div id="panels">
+    <div id="ordersPanel">
+      <div class="pHead">📋 Đơn của phòng</div>
+      <div id="ordersList"><i>Chưa có đơn nào. Khách ngồi vào ghế rồi bấm "Gọi món" nhé.</i></div>
+    </div>
+    <div id="chatPanel">
+      <div class="pHead">💬 Chat quán</div>
+      <div id="chatLog"></div>
+      <form id="chatForm"><input id="chatIn" maxlength="100" placeholder="Chat... (tối đa 100 ký tự)" autocomplete="off"><button type="submit">Gửi</button></form>
+    </div>
+  </div>
+</div>
+
+<!-- Modal menu -->
+<div id="menuModal">
+  <div class="menuCard">
+    <h3>📋 Chọn món (1–3 món)</h3>
+    <div id="menuItems"></div>
+    <div style="display:flex;gap:8px;margin-top:6px">
+      <button id="menuSend" style="flex:1;padding:12px;border:none;border-radius:10px;background:#e07b00;color:#fff;font-weight:800;font-size:15px">Gửi đơn 🧋</button>
+      <button id="menuClose" style="padding:12px 16px;border-radius:10px;border:2px solid #d8c391;background:#fff;font-weight:700">Đóng</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const FACES = ['😀','😎','🐱','🐰','🐻','🐼','🦊','🐸'];
+const MENU_FALLBACK = {
+  trada:{label:'Trà đá',emoji:'🥤',price:5}, trachanh:{label:'Trà chanh',emoji:'🍋',price:7},
+  nuocsau:{label:'Nước sấu',emoji:'🍹',price:6}, nuocmo:{label:'Nước mơ',emoji:'🍑',price:6},
+  nuocvoi:{label:'Nước vối',emoji:'🍵',price:4}, huongduong:{label:'Hướng dương',emoji:'🌻',price:4},
+  keolac:{label:'Kẹo lạc',emoji:'🥜',price:3}
+};
+let MENU = MENU_FALLBACK;
+let myFace = FACES[0], myRole = 'guest';
+let socket = null, me = null, ownerId = null;
+const players = new Map();  // id -> {data, el, x, y, tx, ty, bubbleTimer}
+let seats = [], orders = [], pendingSit = null;
+const keys = {};
+let lastSent = { x: -1, y: -1 }, lastSendAt = 0;
+
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+let toastTimer = null;
+function toast(msg){ const t = $('toast'); t.textContent = msg; t.style.display='block';
+  clearTimeout(toastTimer); toastTimer = setTimeout(()=> t.style.display='none', 3400); }
+
+/* ---------- Chọn mặt + vai ở màn hình vào phòng ---------- */
+FACES.forEach((f, i) => {
+  const b = document.createElement('button'); b.type='button'; b.textContent = f;
+  if (i === 0) b.classList.add('sel');
+  b.onclick = () => { myFace = f; document.querySelectorAll('#faceRow button').forEach(x => x.classList.remove('sel')); b.classList.add('sel'); };
+  $('faceRow').appendChild(b);
+});
+function setRole(r){ myRole = r;
+  $('roleGuest').classList.toggle('sel', r === 'guest');
+  $('roleOwner').classList.toggle('sel', r === 'owner');
+  $('pwWrap').style.display = r === 'owner' ? 'block' : 'none';
+}
+$('roleGuest').onclick = () => setRole('guest');
+$('roleOwner').onclick = () => setRole('owner');
+
+$('joinBtn').onclick = () => {
+  const name = $('inName').value.trim();
+  if (!name) { showErr('Hãy nhập tên của bạn trước nhé.'); return; }
+  if (!socket) { socket = io(); bindSocket(); }
+  $('joinErr').style.display = 'none';
+  socket.emit('join', { name, room: $('inRoom').value.trim() || 'HUNGYEN', face: myFace,
+    role: myRole, password: myRole === 'owner' ? $('inPw').value : '' });
+};
+function showErr(msg){ const e = $('joinErr'); e.textContent = msg; e.style.display = 'block'; }
+
+/* ---------- Socket ---------- */
+function bindSocket(){
+  socket.on('joinError', d => showErr(d.message || 'Không vào được phòng.'));
+  socket.on('joinNotice', d => setTimeout(() => toast('ℹ️ ' + d.message), 600));
+  socket.on('state', s => {
+    MENU = s.menu || MENU_FALLBACK;
+    seats = s.seats; orders = s.orders; ownerId = s.ownerId;
+    me = s.players.find(p => p.id === socket.id) || null;
+    $('joinScreen').style.display = 'none';
+    $('app').style.display = 'flex';
+    $('hRoom').textContent = s.room;
+    $('hOnline').textContent = s.online;
+    s.players.forEach(p => upsertPlayer(p));
+    renderTables(); renderScore(s.score); renderOrders(); updateActions();
+    addChat('<i class="sys">Bạn đã vào phòng ' + escapeHtml(s.room) + '. Chạm vào sàn để đi tới, tới gần ghế trống bấm "Ngồi ghế", ngồi rồi bấm "Gọi món".</i>', true);
+  });
+  socket.on('online', d => $('hOnline').textContent = d.online);
+  socket.on('playerJoined', d => { upsertPlayer(d.player); $('hOnline').textContent = d.online; });
+  socket.on('playerLeft', d => { const p = players.get(d.id); if (p) { p.el.remove(); players.delete(d.id); } $('hOnline').textContent = d.online; });
+  socket.on('ownerChanged', d => { ownerId = d.ownerId; players.forEach(p => drawName(p)); renderOrders(); });
+  socket.on('move', d => { const p = players.get(d.id); if (!p) return;
+    p.data.x = d.x; p.data.y = d.y; p.tx = d.x; p.ty = d.y;
+    if (d.seated) { p.x = d.x; p.y = d.y; } });
+  socket.on('seats', d => { seats = d.seats;
+    seats.forEach(s => { const p = s.takenBy && players.get(s.takenBy); if (p) p.data.seat = s.id; });
+    players.forEach(p => { if (p.data.seat && !seats.some(s => s.id === p.data.seat && s.takenBy === p.data.id)) p.data.seat = null; });
+    renderTables(); updateActions(); });
+  socket.on('orders', d => { orders = d.orders; renderOrders(); renderOrderTags(); });
+  socket.on('orderNew', d => { if (me && ownerId === socket.id) toast('🔔 Có đơn mới: ' + d.order.customerName + ' gọi món!'); renderOrderTags(); });
+  socket.on('orderReady', d => { if (me && ownerId === socket.id) toast('✅ Đơn làm xong! Hãy đi tới bàn khách để giao món.'); });
+  socket.on('orderDelivered', d => {
+    toast(d.byCoBa ? '👩 Cô Ba vừa giao đơn cho ' + d.order.customerName : '🎉 Đã giao món cho ' + d.order.customerName + ' (+' + d.order.price + ' xu)');
+    renderScore(d.score); });
+  socket.on('orderError', d => toast('⚠️ ' + d.message));
+  socket.on('sitError', d => toast('⚠️ ' + d.message));
+  socket.on('score', d => { renderScore(d.score);
+    (d.players || []).forEach(u => { const p = players.get(u.id); if (p) { p.data.xu = u.xu; if (p.data.id === socket.id) $('hMyXu').textContent = u.xu; } }); });
+  socket.on('coBaServe', d => showCoBaBubble('Mang ra bàn ' + d.seatId + ' đây! 🧋'));
+  socket.on('chat', d => {
+    if (d.system) {
+      addChat('<span class="sys">' + escapeHtml(d.face || '📣') + ' <b>' + escapeHtml(d.name) + ':</b> ' + escapeHtml(d.text) + '</span>', true);
+      if (d.name === 'Cô Ba') showCoBaBubble(d.text);
+      return;
+    }
+    addChat('<b>' + escapeHtml(d.face) + ' ' + escapeHtml(d.name) + ':</b> ' + escapeHtml(d.text));
+    const p = players.get(d.id); if (p) showBubble(p, d.text);
+  });
+}
+
+function renderScore(s){ if (!s) return; $('hCups').textContent = s.cupsSold; $('hXu').textContent = s.totalXu; }
+
+/* ---------- Người chơi ---------- */
+function upsertPlayer(p){
+  let rec = players.get(p.id);
+  if (!rec) {
+    const el = document.createElement('div'); el.className = 'player' + (p.id === socket.id ? ' me' : '');
+    el.innerHTML = '<div class="otag"></div><div class="bubble"></div><div class="face"></div><div><span class="nm"></span></div>';
+    $('stage').appendChild(el);
+    rec = { data: p, el, x: p.x, y: p.y, tx: p.x, ty: p.y, bubbleTimer: null };
+    players.set(p.id, rec);
+  }
+  rec.data = { ...rec.data, ...p };
+  rec.el.querySelector('.face').textContent = p.face;
+  drawName(rec);
+  if (p.id === socket.id) { me = rec.data; $('hMe').textContent = (p.role === 'owner' ? '👑 Chủ quán ' : '') + p.name; $('hMyXu').textContent = p.xu; }
+}
+function drawName(rec){ const p = rec.data;
+  rec.el.querySelector('.nm').textContent = (p.id === ownerId ? '👑 ' : '') + p.name + (p.seat ? ' · Bàn ' + p.seat : '');
+}
+function showBubble(rec, text){ const b = rec.el.querySelector('.bubble');
+  b.textContent = text; b.style.display = 'block';
+  clearTimeout(rec.bubbleTimer); rec.bubbleTimer = setTimeout(() => b.style.display = 'none', 5000); }
+let cobaTimer = null;
+function showCoBaBubble(text){ const b = $('cobaBubble'); b.textContent = text; b.style.display = 'block';
+  clearTimeout(cobaTimer); cobaTimer = setTimeout(() => b.style.display = 'none', 5000); }
+
+/* ---------- Bàn ghế ---------- */
+function renderTables(){
+  document.querySelectorAll('.table').forEach(e => e.remove());
+  seats.forEach(s => {
+    const t = document.createElement('div'); t.className = 'table' + (s.takenBy ? ' full' : '');
+    t.style.left = s.x + '%'; t.style.top = s.y + '%';
+    const occ = s.takenBy && players.get(s.takenBy);
+    t.innerHTML = '<div class="emo">🍵🪑</div><div class="cap">Bàn ' + s.id + (occ ? ' · ' + escapeHtml(occ.data.name) : ' · trống') + '</div>';
+    t.onclick = ev => { ev.stopPropagation(); onTableClick(s); };
+    $('stage').appendChild(t);
+  });
+}
+function myRec(){ return players.get(socket.id); }
+function myPos(){ const r = myRec(); return r ? { x: r.x, y: r.y } : null; }
+function distTo(a, b){ const dx = a.x - b.x, dy = a.y - b.y; return Math.sqrt(dx * dx + dy * dy); }
+function onTableClick(s){
+  if (!me || me.seat) return;
+  if (s.takenBy) { toast('Bàn này đã có người ngồi.'); return; }
+  const pos = myPos();
+  if (pos && distTo(pos, s) <= 16) { socket.emit('sit', { seatId: s.id }); return; }
+  pendingSit = s.id;
+  setTarget(s.x, Math.min(97, s.y + 9));
+  toast('Đang đi tới Bàn ' + s.id + '...');
+}
+
+/* ---------- Di chuyển ---------- */
+function setTarget(x, y){ const r = myRec(); if (!r) return;
+  r.tx = Math.max(2, Math.min(98, x)); r.ty = Math.max(20, Math.min(97, y)); }
+$('stage').addEventListener('pointerdown', e => {
+  if (!me || e.target.closest('.table')) return;
+  const rect = $('stage').getBoundingClientRect();
+  const x = (e.clientX - rect.left) / rect.width * 100;
+  const y = (e.clientY - rect.top) / rect.height * 100;
+  pendingSit = null;
+  setTarget(x, Math.max(20, y));
+});
+document.addEventListener('keydown', e => {
+  if (/INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
+  keys[e.key.toLowerCase()] = true;
+});
+document.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+let lastFrame = performance.now();
+function loop(now){
+  const dt = Math.min(0.05, (now - lastFrame) / 1000); lastFrame = now;
+  const r = myRec();
+  if (r && me) {
+    // WASD / mũi tên
+    let dx = 0, dy = 0;
+    if (keys['a'] || keys['arrowleft']) dx -= 1;
+    if (keys['d'] || keys['arrowright']) dx += 1;
+    if (keys['w'] || keys['arrowup']) dy -= 1;
+    if (keys['s'] || keys['arrowdown']) dy += 1;
+    if ((dx || dy) && !me.seat) { pendingSit = null; r.tx = Math.max(2, Math.min(98, r.x + dx * 42 * dt)); r.ty = Math.max(20, Math.min(97, r.y + dy * 42 * dt)); }
+    if (me.seat) { r.tx = r.x; r.ty = r.y; }
+  }
+  players.forEach(p => {
+    const speed = p.data.id === socket.id ? 55 : 40; // %/giây
+    const ddx = p.tx - p.x, ddy = p.ty - p.y, dd = Math.sqrt(ddx * ddx + ddy * ddy);
+    if (dd > 0.05) { const step = Math.min(dd, speed * dt); p.x += ddx / dd * step; p.y += ddy / dd * step; }
+    p.el.style.left = p.x + '%'; p.el.style.top = p.y + '%'; p.el.style.zIndex = 5 + Math.round(p.y);
+  });
+  // Gửi vị trí của mình (throttle 120ms) khi đã di chuyển đáng kể
+  if (r && me && !me.seat) {
+    const moved = Math.abs(r.x - lastSent.x) + Math.abs(r.y - lastSent.y);
+    if (moved > 0.4 && now - lastSendAt > 120) {
+      lastSent = { x: r.x, y: r.y }; lastSendAt = now;
+      socket.emit('move', { x: Math.round(r.x * 10) / 10, y: Math.round(r.y * 10) / 10 });
+    }
+    // Tới gần ghế đã hẹn -> tự ngồi
+    if (pendingSit) {
+      const s = seats.find(x => x.id === pendingSit);
+      if (!s || s.takenBy) pendingSit = null;
+      else if (distTo(r, s) <= 16) { socket.emit('sit', { seatId: s.id }); pendingSit = null; }
+    }
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+setInterval(updateActions, 600);
+
+/* ---------- Nút hành động ---------- */
+function updateActions(){
+  if (!me) return;
+  const seated = !!me.seat;
+  let nearFree = null;
+  if (!seated) { const pos = myPos();
+    if (pos) nearFree = seats.find(s => !s.takenBy && distTo(pos, s) <= 16) || null; }
+  const bSit = $('btnSit');
+  bSit.disabled = !nearFree;
+  bSit.textContent = nearFree ? '🪑 Ngồi ghế (Bàn ' + nearFree.id + ')' : '🪑 Ngồi ghế';
+  bSit.onclick = () => { if (nearFree) socket.emit('sit', { seatId: nearFree.id }); };
+  $('btnStand').disabled = !seated;
+  $('btnStand').onclick = () => socket.emit('stand');
+  const myOrder = orders.find(o => o.customerId === socket.id);
+  $('btnOrder').disabled = !seated || !!myOrder;
+  $('btnOrder').textContent = myOrder ? '📋 Đã gọi món (' + myOrder.status + ')' : '📋 Gọi món';
+}
+$('btnOrder').onclick = () => { buildMenu(); $('menuModal').style.display = 'flex'; };
+$('menuClose').onclick = () => $('menuModal').style.display = 'none';
+const selectedItems = new Set();
+function buildMenu(){
+  selectedItems.clear();
+  const wrap = $('menuItems'); wrap.innerHTML = '';
+  Object.keys(MENU).forEach(k => { const m = MENU[k];
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'mItem';
+    b.textContent = m.emoji + ' ' + m.label + ' · ' + m.price + ' xu';
+    b.onclick = () => { if (selectedItems.has(k)) { selectedItems.delete(k); b.classList.remove('sel'); }
+      else if (selectedItems.size < 3) { selectedItems.add(k); b.classList.add('sel'); }
+      else toast('Tối đa 3 món mỗi đơn thôi nhé.'); };
+    wrap.appendChild(b);
+  });
+}
+$('menuSend').onclick = () => {
+  if (!selectedItems.size) { toast('Hãy chọn ít nhất 1 món.'); return; }
+  socket.emit('order', { items: Array.from(selectedItems) });
+  $('menuModal').style.display = 'none';
+};
+
+/* ---------- Đơn hàng ---------- */
+const ST_TXT = { pending: '⏳ chờ nhận', preparing: '🔥 đang làm', ready: '✅ xong, chờ giao' };
+function itemsText(o){ return o.items.map(k => (MENU[k] ? MENU[k].emoji + ' ' + MENU[k].label : k)).join(', '); }
+function renderOrders(){
+  const w = $('ordersList');
+  if (!orders.length) { w.innerHTML = '<i>Chưa có đơn nào. Khách ngồi vào ghế rồi bấm "Gọi món" nhé.</i>'; return; }
+  w.innerHTML = '';
+  const iAmOwner = me && ownerId === socket.id;
+  orders.forEach(o => {
+    const d = document.createElement('div'); d.className = 'order';
+    let html = '<b>' + escapeHtml(o.customerName) + '</b> · Bàn ' + o.seatId + '<br>' + itemsText(o) +
+      ' — <b>' + o.price + ' xu</b><br><span class="st">' + (ST_TXT[o.status] || o.status) + '</span>' +
+      (o.byId === 'coba' ? ' · 👩 Cô Ba đang lo' : '');
+    d.innerHTML = html;
+    if (iAmOwner && o.status === 'pending' && !o.byId) {
+      const b = document.createElement('button'); b.textContent = '👨‍🍳 Nhận đơn & làm';
+      b.onclick = () => socket.emit('orderAccept', { orderId: o.id });
+      d.appendChild(b);
+    }
+    if (iAmOwner && o.status === 'ready' && o.byId === socket.id) {
+      const b = document.createElement('button'); b.className = 'go'; b.textContent = '🚶 Giao món';
+      b.onclick = () => {
+        const seat = seats.find(s => s.id === o.seatId); const pos = myPos();
+        if (seat && pos && distTo(pos, seat) > 20) { setTarget(seat.x, Math.min(97, seat.y + 6)); toast('Đi tới Bàn ' + o.seatId + ' rồi bấm Giao món lại nhé.'); }
+        else socket.emit('orderDeliver', { orderId: o.id });
+      };
+      d.appendChild(b);
+    }
+    w.appendChild(d);
+  });
+}
+function renderOrderTags(){
+  players.forEach(p => { const t = p.el.querySelector('.otag'); t.style.display = 'none'; });
+  orders.forEach(o => { const p = players.get(o.customerId); if (!p) return;
+    const t = p.el.querySelector('.otag');
+    t.textContent = o.items.map(k => MENU[k] ? MENU[k].emoji : '•').join(' ') + ' ' + (o.status === 'ready' ? '✅' : o.status === 'preparing' ? '🔥' : '⏳');
+    t.style.display = 'block'; });
+}
+
+/* ---------- Chat ---------- */
+$('chatForm').addEventListener('submit', e => { e.preventDefault();
+  const t = $('chatIn').value.trim(); if (!t) return;
+  $('chatIn').value = ''; socket.emit('chat', { text: t }); });
+function addChat(html, raw){
+  const d = document.createElement('div');
+  if (raw) d.innerHTML = html; else d.innerHTML = html;
+  $('chatLog').appendChild(d);
+  while ($('chatLog').children.length > 60) $('chatLog').firstChild.remove();
+  $('chatLog').scrollTop = 1e6;
+}
+</script>
+</body>
+</html>
