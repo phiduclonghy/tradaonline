@@ -4598,7 +4598,7 @@ function p2wX(px){ return (px - 50) / 2; }
 function p2wZ(py){ return (py - 50) / 2; }
 /* vị trí hiển thị của avatar xa: kẹp vào sân chơi offline cho khỏi lạc ra ngoài cảnh */
 function dispX(px){ return clamp(p2wX(px), -17, 17); }
-function dispZ(py){ return clamp(p2wZ(py), -6.5, 9.6); }
+function dispZ(py){ return clamp(p2wZ(py), -6.5, 9.0); }
 
 /* 6 ghế server (seatId 1..6) -> 6 ghế thật trong cảnh offline (bàn, ghế), chọn ghế
    trống trải đều khắp quán và tránh các ghế khách quen cố định hay ngồi (theo FIXED_GUESTS). */
@@ -4631,6 +4631,11 @@ var seatOf = {};    // playerId -> seatId (từ sự kiện seats/state)
 var lastSentX = -999, lastSentY = -999, lastSentAt = 0;
 var lastLocalChair = null, lastLocalSeatId = null;
 var lastChatUntil = 0;
+/* tự động vào phòng: cờ phiên + nhịp tim vị trí + mốc nhắc chưa vào phòng */
+var autoJoinedOnce = false, joinWasAuto = false, leftVoluntarily = false;
+try{ if(sessionStorage.getItem("trada_onl_left") === "1") leftVoluntarily = true; }catch(e){}
+var lastHeartbeatAt = 0;
+var startedSeenAt = 0, remindedNoRoom = false;
 
 /* ----- UI: nút HUD, chip trạng thái, panel vào phòng ----- */
 var css = document.createElement("style");
@@ -4714,7 +4719,9 @@ function refreshPanel(){
 function updateChip(){
   if(!joined){ chip.style.display = "none"; return; }
   chip.style.display = "block";
-  chip.textContent = "🌐 Phòng " + roomCode + " • " + onlineCount + " người • " + (socket && socket.connected ? "Đã nối" : "Đang nối lại…");
+  chip.textContent = joinWasAuto
+    ? "🌐 Đã tự động vào phòng " + roomCode + " • " + onlineCount + " người • " + (socket && socket.connected ? "Đã nối" : "Đang nối lại…")
+    : "🌐 Phòng " + roomCode + " • " + onlineCount + " người • " + (socket && socket.connected ? "Đã nối" : "Đang nối lại…");
 }
 
 /* ----- dựng avatar 3D cho người chơi khác ----- */
@@ -4828,6 +4835,7 @@ function ensureSocket(){
   });
   socket.on("disconnect", function(){
     if(joined) setStatus("Mất kết nối — đang tự nối lại…");
+    if(lastJoin) pendingRejoin = true;   // để sự kiện connect tự vào lại phòng (doLeave đã xoá lastJoin trước nên không tự vào lại khi rời phòng chủ động)
     updateChip();
   });
   socket.on("state", function(st){
@@ -4839,8 +4847,20 @@ function ensureSocket(){
     (st.seats || []).forEach(function(s){ if(s.takenBy) seatOf[s.takenBy] = s.id; });
     (st.players || []).forEach(upsertRemote);
     lastLocalChair = null; lastLocalSeatId = null;
-    setStatus("Đã vào phòng " + roomCode + " — " + onlineCount + " người thật online.");
-    gToast("Đã vào phòng online " + roomCode + " 🌐");
+    /* gửi vị trí hiện tại ngay lập tức (kể cả đang đứng yên) để máy khác thấy mình ngay */
+    var ps0 = gPlayerState();
+    if(ps0 && !ps0.sitting){
+      var fx = w2pX(ps0.x), fy = w2pY(ps0.z);
+      lastSentX = fx; lastSentY = fy; lastSentAt = performance.now(); lastHeartbeatAt = lastSentAt;
+      socket.emit("move", { x: Math.round(fx * 10) / 10, y: Math.round(fy * 10) / 10 });
+    }
+    if(joinWasAuto){
+      setStatus("Đã tự động vào phòng " + roomCode + " — " + onlineCount + " người thật online.");
+      gToast("Đã tự động vào phòng " + roomCode + " 🌐 Bấm nút 🌐 nếu muốn đổi phòng hoặc rời phòng.");
+    } else {
+      setStatus("Đã vào phòng " + roomCode + " — " + onlineCount + " người thật online.");
+      gToast("Đã vào phòng online " + roomCode + " 🌐");
+    }
     refreshPanel(); updateChip();
   });
   socket.on("playerJoined", function(d){
@@ -4905,6 +4925,9 @@ function ensureSocket(){
   return socket;
 }
 function doJoin(){
+  joinWasAuto = false;
+  leftVoluntarily = false;
+  try{ sessionStorage.removeItem("trada_onl_left"); }catch(e){}
   var s = ensureSocket(); if(!s) return;
   if(!gStarted()){ gToast("Hãy vào quán (màn chào) trước rồi mới vào phòng online nhé."); }
   var sv = gSave();
@@ -4923,6 +4946,8 @@ function doJoin(){
   else { pendingRejoin = true; s.connect(); }
 }
 function doLeave(){
+  leftVoluntarily = true;
+  try{ sessionStorage.setItem("trada_onl_left", "1"); }catch(e){}
   joined = false; pendingRejoin = false; lastJoin = null; myId = null; ownerId = null;
   if(socket) socket.disconnect();
   clearRemotes();
@@ -4930,6 +4955,41 @@ function doLeave(){
   gToast("Đã rời phòng online — quán offline vẫn chơi bình thường.");
   refreshPanel(); updateChip();
 }
+
+/* ----- tự động vào phòng khi game đã bắt đầu (tối đa 1 lần mỗi lần tải trang;
+   không tự vào nếu người chơi đã chủ động bấm "Rời phòng" trong phiên này) ----- */
+function doAutoJoin(){
+  var s = ensureSocket(); if(!s) return;
+  var sv = gSave();
+  var room = "HUNGYEN";
+  try{ room = localStorage.getItem("trada_onl_room") || room; }catch(e){}
+  var roomEl = $("onl-room"); if(roomEl) roomEl.value = room;
+  joinWasAuto = true;
+  lastJoin = {
+    name: (sv && sv.name) || "Khách quen",
+    room: String(room).toUpperCase() || "HUNGYEN",
+    face: selFace,
+    role: "guest",
+    password: ""
+  };
+  roomCode = lastJoin.room;
+  setStatus("Đang tự động vào phòng " + roomCode + "…");
+  if(s.connected) s.emit("join", lastJoin);
+  else { pendingRejoin = true; s.connect(); }
+}
+setInterval(function(){
+  var now = performance.now();
+  if(gStarted() && !startedSeenAt) startedSeenAt = now;
+  if(!startedSeenAt) return;
+  if(!autoJoinedOnce && !leftVoluntarily && !joined){
+    autoJoinedOnce = true;
+    doAutoJoin();
+  }
+  if(!joined && !leftVoluntarily && !remindedNoRoom && now - startedSeenAt >= 20000){
+    remindedNoRoom = true;
+    gToast("Chưa vào phòng online — bấm nút 🌐 để vào cùng phòng với người thật.");
+  }
+}, 1000);
 
 /* ----- vòng lặp đồng bộ riêng (20 lần/giây) ----- */
 var lastTick = performance.now();
@@ -4996,6 +5056,12 @@ setInterval(function(){
   if(ps && !ps.sitting){
     var px = w2pX(ps.x), py = w2pY(ps.z);
     if(Math.hypot(px - lastSentX, py - lastSentY) > 0.25 && now - lastSentAt >= 110){
+      lastSentX = px; lastSentY = py; lastSentAt = now;
+      socket.emit("move", { x: Math.round(px * 10) / 10, y: Math.round(py * 10) / 10 });
+    }
+    /* nhịp tim: mỗi 2 giây gửi lại vị trí hiện tại dù đang đứng yên (không gửi khi đang ngồi — đã có sit) */
+    if(now - lastHeartbeatAt >= 2000){
+      lastHeartbeatAt = now;
       lastSentX = px; lastSentY = py; lastSentAt = now;
       socket.emit("move", { x: Math.round(px * 10) / 10, y: Math.round(py * 10) / 10 });
     }
