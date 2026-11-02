@@ -4567,8 +4567,11 @@ const BANK600 = [["Phần của đường bộ được sử dụng cho phương
 /* ============================================================
    LỚP ONLINE (ghép thêm — không sửa logic gốc của bản offline):
    đồng bộ người thật qua Socket.io của server tra-da-multiplayer.
-   Đồng bộ: hiện diện + di chuyển + ngồi ghế (6 ghế) + chat.
-   Khách AI, Cô Ba local, Đố vui, quà, Sổ... vẫn là local từng máy.
+   Đồng bộ: hiện diện + di chuyển + ngồi ghế (mọi ghế trong quán; tối đa 6 người
+   ngồi được đồng bộ cùng lúc theo số ghế của server; ghế người thật đang ngồi bị
+   khoá, không ai ngồi trùng) + chat.
+   Bản online này TẮT toàn bộ khách AI; Cô Ba local, Đố vui, quà, Sổ... vẫn là
+   local từng máy.
    ============================================================ */
 (function(){
 "use strict";
@@ -4587,6 +4590,11 @@ function gSitPerson(p, x, z, a){ var f = gg(function(){ return sitPerson; }); if
 function gProjectBubble(el, pos, y){ var f = gg(function(){ return projectBubble; }); if(typeof f === "function"){ try{ f(el, pos, y); return true; }catch(e){} } return false; }
 function gBubbleUntil(){ return gg(function(){ return playerBubbleUntil; }) || 0; }
 function gStarted(){ return !!gg(function(){ return started; }); }
+function gGroundPoint(cx, cy){ var f = gg(function(){ return groundPoint; }); if(typeof f === "function"){ try{ return f(cx, cy); }catch(e){} } return undefined; }
+function gGuests(){ return gg(function(){ return guests; }); }
+function gSeatedGuests(){ return gg(function(){ return seatedGuests; }); }
+function gGQuest(){ return gg(function(){ return GQuest; }); }
+function gGiftPeople(){ return gg(function(){ return GIFT_PEOPLE; }); }
 function $(id){ return document.getElementById(id); }
 function escHtml(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){ return { "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]; }); }
 function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
@@ -4619,6 +4627,187 @@ function seatIdByPct(x, y){
   for(var id in SEAT_PCT){ var s = SEAT_PCT[id]; if(Math.abs(s[0] - x) < 0.6 && Math.abs(s[1] - y) < 0.6) return Number(id); }
   return null;
 }
+/* Mọi ghế offline (mọi bàn) dạng {chair, x, z, angle} — chair là object ghế thật
+   của game nên đặt used/onlineBy lên nó là các hệ chọn ghế của game nhìn thấy ngay */
+function allOfflineChairs(){
+  var tabs = gTables(); if(!tabs) return [];
+  var out = [];
+  for(var ti = 0; ti < tabs.length; ti++){
+    var chs = tabs[ti] && tabs[ti].chairs; if(!chs) continue;
+    for(var ci = 0; ci < chs.length; ci++){
+      var c = chs[ci]; if(!c) continue;
+      out.push({ chair: c, x: c.x, z: c.z, angle: c.angle });
+    }
+  }
+  return out;
+}
+/* ghế offline gần nhất quanh một điểm world (quét mọi bàn) — dùng để đặt avatar xa
+   ngồi vào ĐÚNG ghế thật mà máy kia đã ngồi, thay vì chỉ dùng ghế tham chiếu của seatId */
+function nearestOfflineChair(x, z, maxDist){
+  var all = allOfflineChairs();
+  var best = null, bestD = maxDist;
+  for(var i = 0; i < all.length; i++){
+    var it = all[i];
+    var d = Math.hypot(it.x - x, it.z - z);
+    if(d <= bestD){ bestD = d; best = it; }
+  }
+  return best;
+}
+function nearestChairRecord(x, z){
+  var all = allOfflineChairs();
+  var best = null, bestD = Infinity;
+  for(var i = 0; i < all.length; i++){
+    var it = all[i];
+    var d = Math.hypot(it.x - x, it.z - z);
+    if(d < bestD){ bestD = d; best = it; }
+  }
+  return { item: best, dist: bestD };
+}
+function localSittingChair(){
+  var ps = gPlayerState();
+  return (ps && ps.sitting && ps.sitting.chair) ? ps.sitting.chair : null;
+}
+/* Chọn ghế HIỂN THỊ cho một avatar xa: ghế trống gần điểm đích nhất trong vòng
+   5 đơn vị. Bỏ qua ghế người chơi local đang ngồi, ghế avatar xa khác đã khoá
+   (onlineBy) và mọi ghế đang used bởi hệ khác — trừ chính ghế avatar này đã khoá.
+   Không có ghế phù hợp -> null (avatar đứng cạnh bàn, không ngồi đè lên ai). */
+function findDisplayChair(chairs, x, z, selfId, localChair, maxDist){
+  if(!chairs) return null;
+  var best = null, bestD = maxDist;
+  for(var i = 0; i < chairs.length; i++){
+    var it = chairs[i]; if(!it || !it.chair) continue;
+    var c = it.chair;
+    if(c === localChair) continue;
+    if(c.onlineBy && c.onlineBy !== selfId) continue;
+    if(c.used && c.onlineBy !== selfId) continue;
+    var d = Math.hypot(it.x - x, it.z - z);
+    if(d <= bestD){ bestD = d; best = it; }
+  }
+  return best;
+}
+/* Gỡ khoá ghế hiển thị của một avatar xa: CHỈ gỡ khi onlineBy đúng là avatar đó,
+   và khôi phục đúng trạng thái used mà ghế có trước khi bị khoá. */
+function releaseDisplayChair(r){
+  if(!r) return;
+  var c = r.displayChairObj || (r.displayChair && r.displayChair.chair) || null;
+  if(c && c.onlineBy === r.id){
+    c.used = !!r.displayChairPrevUsed;
+    delete c.onlineBy;
+  }
+  r.displayChair = null; r.displayChairObj = null; r.displayChairPrevUsed = false;
+}
+/* Chọn + khoá ghế hiển thị cho avatar xa: ghế được chọn bị đánh dấu used=true và
+   onlineBy=<id> ngay (đồng bộ trong cùng tick) nên hai avatar không bao giờ nhận
+   cùng một ghế, và nearestFreeChair của game tự bỏ qua ghế này cho người local. */
+function assignDisplayChair(r, x, z){
+  if(!r) return null;
+  var found = findDisplayChair(allOfflineChairs(), x, z, r.id, localSittingChair(), 5.0);
+  if(!found){ releaseDisplayChair(r); return null; }
+  var c = found.chair;
+  if(r.displayChairObj === c && c.onlineBy === r.id){ r.displayChair = found; return found; }
+  releaseDisplayChair(r);
+  r.displayChairPrevUsed = (c.onlineBy === r.id) ? false : !!c.used;
+  c.used = true; c.onlineBy = r.id;
+  r.displayChair = found; r.displayChairObj = c;
+  return found;
+}
+
+/* ----- BẢN ONLINE KHÔNG CÓ KHÁCH AI -----
+   Lớp online chạy sau mọi khối game nên khách quen cố định đã kịp được tạo; hàm
+   này gỡ họ khỏi cảnh + hai mảng guests/seatedGuests, trả ghế trống, và vô hiệu
+   hoá các đường sinh/dùng khách AI còn lại: GQuest.spawn/tick (nhiệm vụ khách
+   nhờ sẽ không xuất hiện nữa), spawnVIP (VIP vốn chỉ đội vương miện cho một
+   khách quen), và danh sách người nhận quà chỉ còn Cô Ba. Các hệ khác của game
+   đều lọc guests/seatedGuests trước khi dùng nên mảng rỗng không gây lỗi. */
+var aiGuestsDisabled = false;
+function disableSpawnVip(){
+  var f = gg(function(){ return spawnVIP; });
+  if(typeof f === "function" && !f.__onlineNoAi){
+    var noop = function(){}; noop.__onlineNoAi = true;
+    gg(function(){ spawnVIP = noop; });
+  }
+}
+function disableAiGuests(){
+  var gs = gGuests();
+  if(Array.isArray(gs) && gs.length){
+    gs.slice().forEach(function(gd){
+      if(!gd) return;
+      if(gd.chairRef){ gd.chairRef.used = false; if(gd.chairRef.onlineBy) delete gd.chairRef.onlineBy; }
+      if(gd.order && gd.order.bubbleEl && gd.order.bubbleEl.parentNode) gd.order.bubbleEl.parentNode.removeChild(gd.order.bubbleEl);
+      if(gd.servedMeshes && gd.servedMeshes.parent) gd.servedMeshes.parent.remove(gd.servedMeshes);
+      if(gd.crown && gd.p) gd.p.remove(gd.crown);
+      if(gd.p && gd.p.parent) gd.p.parent.remove(gd.p);
+    });
+    gs.length = 0;
+  }
+  var sg = gSeatedGuests(); if(Array.isArray(sg)) sg.length = 0;
+  var q = gGQuest();
+  if(q){
+    q.nextAt = Infinity;
+    if(Array.isArray(q.list)){
+      q.list.forEach(function(item){ if(item && item.markEl) item.markEl.remove(); });
+      q.list.length = 0;
+    }
+    if(!q.__onlineNoAi){ q.__onlineNoAi = true; q.spawn = function(){}; q.tick = function(){}; }
+  }
+  var gp = gGiftPeople();
+  if(Array.isArray(gp) && !(gp.length === 1 && gp[0] === "Cô Ba")) gp.splice(0, gp.length, "Cô Ba");
+  if(!aiGuestsDisabled){ disableSpawnVip(); aiGuestsDisabled = true; }
+}
+disableAiGuests();
+setInterval(disableAiGuests, 1000);
+/* tập seatId đang bị người KHÁC giữ (theo seatOf mà lớp online đang theo dõi) */
+function occupiedSeatIds(){
+  var occ = {};
+  for(var pid in seatOf){ if(pid !== myId) occ[seatOf[pid]] = true; }
+  return occ;
+}
+/* chọn seatId cho ghế local vừa ngồi: ghế mình đang giữ thì giữ nguyên; còn lại lấy
+   seatId đang trống (chưa bị giữ, chưa thử hụt trong lần ngồi này) có ghế tham chiếu
+   gần ghế thật nhất; không có bản đồ ghế tham chiếu thì lấy seatId trống đầu tiên */
+function pickSeatIdForChair(chair, smap){
+  var occ = occupiedSeatIds();
+  var cands = [];
+  for(var sid = 1; sid <= 6; sid++){ if(!occ[sid] && !sitTriedSeats[sid]) cands.push(sid); }
+  if(!cands.length) return null;
+  var mine = seatOf[myId] || null;
+  if(mine && cands.indexOf(mine) >= 0) return mine;
+  if(smap && chair){
+    cands.sort(function(a, b){
+      var ca = smap[a - 1], cb = smap[b - 1];
+      if(!ca || !cb) return 0;
+      return Math.hypot(ca.x - chair.x, ca.z - chair.z) - Math.hypot(cb.x - chair.x, cb.z - chair.z);
+    });
+  }
+  return cands[0];
+}
+/* gửi ngay vị trí hiện tại (dùng ngay trước 'sit' để máy khác nhận toạ độ ghế thật) */
+function emitMoveNow(ps){
+  if(!socket) return;
+  var px = w2pX(ps.x), py = w2pY(ps.z);
+  lastSentX = px; lastSentY = py; lastSentAt = performance.now(); lastHeartbeatAt = lastSentAt;
+  socket.emit("move", { x: Math.round(px * 10) / 10, y: Math.round(py * 10) / 10 });
+}
+/* đồng bộ lần ngồi hiện tại lên server: 'move' (toạ độ ghế thật) đi TRƯỚC, 'sit' đi SAU.
+   skipAdopt: trường hợp chuyển ghế — vừa emit 'stand' trong cùng tick, seatOf[myId] lúc
+   đó vẫn còn ghế cũ chưa kịp xoá nên không được "nhận luôn" ghế cũ đó. */
+function trySyncSit(chair, ps, smap, skipAdopt){
+  var held = seatOf[myId] || null;
+  if(held && !skipAdopt){ syncedSeatId = held; pendingSeatId = null; localSitUnsynced = false; return; }
+  emitMoveNow(ps);
+  var sid = pickSeatIdForChair(chair, smap);
+  if(sid == null){
+    localSitUnsynced = true; pendingSeatId = null;
+    if(!fullSeatToastShown){
+      fullSeatToastShown = true;
+      gToast("6 ghế online đã có người — bạn cứ ngồi chơi, người khác tạm chưa thấy bạn ngồi nhé.");
+    }
+    return;
+  }
+  sitTriedSeats[sid] = true;
+  pendingSeatId = sid;
+  socket.emit("sit", { seatId: sid });
+}
 
 /* ----- trạng thái lớp online ----- */
 var FACES = ["😀","😎","🐱","🐰","🐻","🐼","🦊","🐸"];
@@ -4629,7 +4818,11 @@ try{ selFace = localStorage.getItem("trada_onl_face") || "😀"; if(FACES.indexO
 var remotes = {};   // id -> remote record
 var seatOf = {};    // playerId -> seatId (từ sự kiện seats/state)
 var lastSentX = -999, lastSentY = -999, lastSentAt = 0;
-var lastLocalChair = null, lastLocalSeatId = null;
+var lastLocalChair = null;
+/* đồng bộ ngồi ghế cho MỌI ghế: ghế server mình đang giữ / đang chờ xác nhận / đã thử hụt */
+var syncedSeatId = null, pendingSeatId = null;
+var sitTriedSeats = {}, sitRetryUsed = false;
+var localSitUnsynced = false, fullSeatToastShown = false;
 var lastChatUntil = 0;
 /* tự động vào phòng: cờ phiên + nhịp tim vị trí + mốc nhắc chưa vào phòng */
 var autoJoinedOnce = false, joinWasAuto = false, leftVoluntarily = false;
@@ -4672,7 +4865,7 @@ panel.id = "p-online";
 panel.innerHTML =
 "<div class='onl-card'>" +
 "<h2>🌐 Chơi online cùng phòng</h2>" +
-"<p>Vào cùng một mã phòng để thấy người thật đi lại, ngồi ghế và chat trong chính quán này. Khách AI, Cô Ba, Đố vui, quà... vẫn là của riêng máy bạn.</p>" +
+"<p>Vào cùng một mã phòng để thấy người thật đi lại, ngồi ghế và chat trong chính quán này. Bản online này không có khách AI — trong quán chỉ có người thật, Cô Ba và các hoạt động riêng của máy bạn.</p>" +
 "<label>Mã phòng</label><input type='text' id='onl-room' maxlength='16' value='HUNGYEN' autocomplete='off'>" +
 "<label>Huy hiệu mặt (hiện trên đầu nhân vật của bạn ở máy người khác)</label><div class='onl-faces' id='onl-faces'></div>" +
 "<label>Vai của bạn</label><select id='onl-role'><option value='guest'>Khách</option><option value='owner'>Chủ quán</option></select>" +
@@ -4695,6 +4888,21 @@ FACES.forEach(function(f){
   faceBox.appendChild(fb);
 });
 try{ var savedRoom = localStorage.getItem("trada_onl_room"); if(savedRoom) $("onl-room").value = savedRoom; }catch(e){}
+var lastOccupiedChairToastAt = 0;
+var gameCanvas = document.querySelector("canvas");
+if(gameCanvas){
+  gameCanvas.addEventListener("pointerdown", function(e){
+    var pt = gGroundPoint(e.clientX, e.clientY); if(!pt) return;
+    var nearest = nearestChairRecord(pt.x, pt.z);
+    if(nearest.item && nearest.dist <= 1.2 && nearest.item.chair.onlineBy){
+      var now = performance.now();
+      if(now - lastOccupiedChairToastAt >= 3000){
+        lastOccupiedChairToastAt = now;
+        gToast("Ghế này đã có người ngồi rồi — xin mời sang bàn khác ☕");
+      }
+    }
+  });
+}
 $("onl-role").addEventListener("change", function(){ $("onl-passrow").style.display = this.value === "owner" ? "block" : "none"; });
 $("onl-close").addEventListener("click", function(){ panel.classList.remove("open"); });
 $("onl-join").addEventListener("click", doJoin);
@@ -4795,7 +5003,7 @@ function upsertRemote(p){
   var r = remotes[p.id];
   if(!r){
     r = { id: p.id, name: p.name || "Khách", face: p.face || "😀", tx: 0, tz: 7, phase: Math.random() * 6,
-          seated: false, seatId: null, bubbleEl: null, bubbleUntil: 0, nameSprite: null, grp: null };
+          seated: false, seatId: null, displayChair: null, bubbleEl: null, bubbleUntil: 0, nameSprite: null, grp: null };
     r.grp = makeRemotePerson(r);
     r.tx = dispX(typeof p.x === "number" ? p.x : 50); r.tz = dispZ(typeof p.y === "number" ? p.y : 90);
     r.grp.position.set(r.tx, 0, r.tz);
@@ -4807,10 +5015,15 @@ function upsertRemote(p){
   if(p.seat){ r.seatId = p.seat; }
   else if(seatOf[p.id]){ r.seatId = seatOf[p.id]; }
   r.seated = !!r.seatId;
+  /* vào phòng muộn (state có seat): tìm ghế thật gần toạ độ hiện tại để đặt avatar
+     ngồi vào đúng ghế đó; không thấy thì vòng render sẽ dùng ghế tham chiếu của seatId */
+  if(r.seated){ if(!r.displayChair) assignDisplayChair(r, r.tx, r.tz); }
+  else releaseDisplayChair(r);
   redrawName(r);
 }
 function removeRemote(id){
   var r = remotes[id]; if(!r) return;
+  releaseDisplayChair(r);
   if(r.grp && r.grp.parent) r.grp.parent.remove(r.grp);
   if(r.bubbleEl && r.bubbleEl.parentNode) r.bubbleEl.parentNode.removeChild(r.bubbleEl);
   delete remotes[id];
@@ -4846,7 +5059,8 @@ function ensureSocket(){
     seatOf = {};
     (st.seats || []).forEach(function(s){ if(s.takenBy) seatOf[s.takenBy] = s.id; });
     (st.players || []).forEach(upsertRemote);
-    lastLocalChair = null; lastLocalSeatId = null;
+    lastLocalChair = null; syncedSeatId = seatOf[myId] || null; pendingSeatId = null;
+    sitTriedSeats = {}; sitRetryUsed = false; localSitUnsynced = false; fullSeatToastShown = false;
     /* gửi vị trí hiện tại ngay lập tức (kể cả đang đứng yên) để máy khác thấy mình ngay */
     var ps0 = gPlayerState();
     if(ps0 && !ps0.sitting){
@@ -4877,21 +5091,37 @@ function ensureSocket(){
   socket.on("move", function(d){
     if(!d || d.id === myId) return;
     var r = remotes[d.id]; if(!r) return;
+    if(d.seated && !r.displayChair){
+      /* máy kia vừa ngồi: đích hiện tại của avatar đang là toạ độ ghế THẬT (họ gửi move
+         ngay trước sit) — chốt ghế hiển thị theo đó trước khi toạ độ ghế của server
+         (đi kèm sự kiện này) ghi đè tx/tz */
+      assignDisplayChair(r, r.tx, r.tz);
+    }
     if(typeof d.x === "number") r.tx = dispX(d.x);
     if(typeof d.y === "number") r.tz = dispZ(d.y);
     if(d.seated){
       r.seatId = seatOf[d.id] || seatIdByPct(d.x, d.y) || r.seatId;
       r.seated = !!r.seatId;
+      if(r.seated && !r.displayChair) assignDisplayChair(r, r.tx, r.tz);
     } else if(!seatOf[d.id]){
-      r.seated = false; r.seatId = null;
+      r.seated = false; r.seatId = null; releaseDisplayChair(r);
     }
   });
   socket.on("seats", function(d){
     seatOf = {};
     (d && d.seats || []).forEach(function(s){ if(s.takenBy) seatOf[s.takenBy] = s.id; });
+    /* xác nhận ghế của chính mình: server đã ghi mình ngồi seatOf[myId] nghĩa là lần sit
+       đã thành công; ngược lại nếu ghế mình đang giữ bỗng mất khỏi seatOf (server đã bỏ)
+       thì mở lại đồng bộ ở tick sau nếu mình vẫn đang ngồi */
+    if(myId && seatOf[myId]){ syncedSeatId = seatOf[myId]; pendingSeatId = null; localSitUnsynced = false; }
+    else if(myId && syncedSeatId && !seatOf[myId]){ syncedSeatId = null; pendingSeatId = null; lastLocalChair = null; }
     for(var id in remotes){
       var r = remotes[id];
-      if(seatOf[id]){ r.seatId = seatOf[id]; r.seated = true; }
+      if(seatOf[id]){
+        /* sự kiện seats tới trước move{seated}: tx/tz lúc này vẫn là toạ độ ghế thật */
+        if(!r.seated && !r.displayChair) assignDisplayChair(r, r.tx, r.tz);
+        r.seatId = seatOf[id]; r.seated = true;
+      }
       else if(r.seated && !seatOf[id]){ /* chờ sự kiện move đi kèm để hạ ghế, tránh nhấp nháy */ }
     }
   });
@@ -4920,7 +5150,27 @@ function ensureSocket(){
     refreshPanel(); updateChip();
   });
   socket.on("joinNotice", function(d){ if(d && d.message){ gToast(d.message); setStatus(d.message); } });
-  socket.on("sitError", function(d){ if(d && d.message) gToast(d.message); });
+  socket.on("sitError", function(d){
+    /* lần sit vừa rồi bị tranh ghế trong tích tắc: thử lại ĐÚNG 1 lần với seatId trống
+       gần nhất còn lại (không gửi lại move — toạ độ ghế thật đã gửi ngay trước sit rồi,
+       và mình chưa giữ ghế nào nên cũng không lo server hiểu move là đứng dậy) */
+    if(pendingSeatId != null && !syncedSeatId){
+      pendingSeatId = null;
+      var psE = gPlayerState();
+      if(psE && psE.sitting && !sitRetryUsed){
+        sitRetryUsed = true;
+        var sid2 = pickSeatIdForChair(psE.sitting.chair, resolveSeatMap());
+        if(sid2 != null){
+          sitTriedSeats[sid2] = true; pendingSeatId = sid2;
+          socket.emit("sit", { seatId: sid2 });
+          return;
+        }
+      }
+      localSitUnsynced = true;   /* hết ghế trống / đã thử lại: ngồi chưa đồng bộ, không toast thêm */
+      return;
+    }
+    if(d && d.message) gToast(d.message);
+  });
   socket.on("orderError", function(d){ if(d && d.message) gToast(d.message); });
   return socket;
 }
@@ -5002,10 +5252,16 @@ setInterval(function(){
   for(var id in remotes){
     var r = remotes[id];
     if(!r.grp) continue;
-    if(r.seated && r.seatId && smap && smap[r.seatId - 1]){
-      var sp = smap[r.seatId - 1];
-      if(!gSitPerson(r.grp, sp.x, sp.z, sp.angle)){
-        r.grp.position.set(sp.x, -0.32, sp.z); r.grp.rotation.y = sp.angle;
+    /* avatar đang ngồi: ưu tiên ghế THẬT nó đã ngồi ở máy kia (displayChair — chốt lúc
+       nó ngồi xuống), không tìm thấy mới dùng ghế tham chiếu của seatId như trước */
+    var chairPos = null;
+    if(r.seated){
+      if(!r.displayChair) assignDisplayChair(r, r.tx, r.tz);
+      chairPos = r.displayChair || (!gTables() && r.seatId && smap ? smap[r.seatId - 1] : null);
+    }
+    if(chairPos){
+      if(!gSitPerson(r.grp, chairPos.x, chairPos.z, chairPos.angle)){
+        r.grp.position.set(chairPos.x, -0.32, chairPos.z); r.grp.rotation.y = chairPos.angle;
         var u0 = r.grp.userData; u0.legL.rotation.x = -1.5; u0.legR.rotation.x = -1.5; u0.armL.rotation.x = -0.7; u0.armR.rotation.x = -0.7;
       }
     } else {
@@ -5038,17 +5294,26 @@ setInterval(function(){
 
   if(!joined || !socket) return;
 
-  /* 2) ghế local: phát hiện ngồi / đứng để đồng bộ */
+  /* 2) ghế local: phát hiện ngồi / đứng ở MỌI ghế (không chỉ 6 ghế tham chiếu) để đồng bộ.
+     Đang ngồi thì TUYỆT ĐỐI không emit move ở mục 3 — server coi mọi 'move' lúc đang giữ
+     ghế là đứng dậy. Riêng lần ngồi mới: 'move' (toạ độ ghế thật) đi TRƯỚC 'sit' (xem
+     trySyncSit), và chuyển ghế trực tiếp = stand ghế cũ + quy trình ngồi ghế mới. */
   var ps = gPlayerState();
-  if(ps && smap){
+  if(ps){
     var curChair = ps.sitting ? ps.sitting.chair : null;
     if(curChair !== lastLocalChair){
-      var newSeatId = null;
-      if(curChair) for(var i = 0; i < smap.length; i++) if(smap[i].chair === curChair){ newSeatId = smap[i].seatId; break; }
-      if(newSeatId && newSeatId !== lastLocalSeatId) socket.emit("sit", { seatId: newSeatId });
-      else if(!newSeatId && lastLocalSeatId) socket.emit("stand", {});
-      lastLocalSeatId = newSeatId;
-      lastLocalChair = curChair;
+      if(curChair){
+        var switching = !!lastLocalChair;
+        if(syncedSeatId){ socket.emit("stand", {}); syncedSeatId = null; }
+        pendingSeatId = null; sitTriedSeats = {}; sitRetryUsed = false;
+        localSitUnsynced = false; fullSeatToastShown = false;
+        lastLocalChair = curChair;
+        trySyncSit(curChair, ps, smap, switching);
+      } else {
+        if(syncedSeatId){ socket.emit("stand", {}); syncedSeatId = null; }
+        pendingSeatId = null; localSitUnsynced = false;
+        lastLocalChair = null;
+      }
     }
   }
 
